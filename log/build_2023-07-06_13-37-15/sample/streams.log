@@ -1,0 +1,85 @@
+[1.190s] Invoking command in '/home/sp/robot_ws/build/sample': PYTHONPATH=/home/sp/robot_ws/build/sample/prefix_override:/home/sp/robot_ws/install/sample/lib/python3.8/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py develop --editable --build-directory /home/sp/robot_ws/build/sample/build --no-deps install_data
+[1.362s] /home/sp/.local/lib/python3.8/site-packages/setuptools/dist.py:745: SetuptoolsDeprecationWarning: Invalid dash-separated options
+[1.362s] !!
+[1.362s] 
+[1.362s]         ********************************************************************************
+[1.363s]         Usage of dash-separated 'script-dir' will not be supported in future
+[1.363s]         versions. Please use the underscore name 'script_dir' instead.
+[1.363s] 
+[1.363s]         By 2023-Sep-26, you need to update your project and remove deprecated calls
+[1.363s]         or your builds will no longer be supported.
+[1.363s] 
+[1.363s]         See https://setuptools.pypa.io/en/latest/userguide/declarative_config.html for details.
+[1.363s]         ********************************************************************************
+[1.363s] 
+[1.363s] !!
+[1.363s]   opt = self.warn_dash_deprecation(opt, section)
+[1.634s] running develop
+[1.634s] /home/sp/.local/lib/python3.8/site-packages/setuptools/command/develop.py:40: EasyInstallDeprecationWarning: easy_install command is deprecated.
+[1.634s] !!
+[1.634s] 
+[1.634s]         ********************************************************************************
+[1.634s]         Please avoid running ``setup.py`` and ``easy_install``.
+[1.634s]         Instead, use pypa/build, pypa/installer or other
+[1.635s]         standards-based tools.
+[1.635s] 
+[1.635s]         See https://github.com/pypa/setuptools/issues/917 for details.
+[1.635s]         ********************************************************************************
+[1.635s] 
+[1.635s] !!
+[1.635s]   easy_install.initialize_options(self)
+[1.676s] /home/sp/.local/lib/python3.8/site-packages/setuptools/_distutils/cmd.py:66: SetuptoolsDeprecationWarning: setup.py install is deprecated.
+[1.676s] !!
+[1.676s] 
+[1.676s]         ********************************************************************************
+[1.676s]         Please avoid running ``setup.py`` directly.
+[1.676s]         Instead, use pypa/build, pypa/installer or other
+[1.676s]         standards-based tools.
+[1.676s] 
+[1.676s]         See https://blog.ganssle.io/articles/2021/10/setup-py-deprecated.html for details.
+[1.676s]         ********************************************************************************
+[1.676s] 
+[1.676s] !!
+[1.676s]   self.initialize_options()
+[1.905s] running egg_info
+[1.906s] creating sample.egg-info
+[1.927s] writing sample.egg-info/PKG-INFO
+[1.927s] writing dependency_links to sample.egg-info/dependency_links.txt
+[1.928s] writing entry points to sample.egg-info/entry_points.txt
+[1.928s] writing requirements to sample.egg-info/requires.txt
+[1.928s] writing top-level names to sample.egg-info/top_level.txt
+[1.929s] writing manifest file 'sample.egg-info/SOURCES.txt'
+[1.974s] reading manifest file 'sample.egg-info/SOURCES.txt'
+[1.976s] writing manifest file 'sample.egg-info/SOURCES.txt'
+[2.045s] running build_ext
+[2.046s] Creating /home/sp/robot_ws/install/sample/lib/python3.8/site-packages/sample.egg-link (link to .)
+[2.048s] Installing build_map script to /home/sp/robot_ws/install/sample/lib/sample
+[2.048s] Installing feature_points script to /home/sp/robot_ws/install/sample/lib/sample
+[2.048s] Installing map_talker script to /home/sp/robot_ws/install/sample/lib/sample
+[2.048s] Installing map_talker_copy script to /home/sp/robot_ws/install/sample/lib/sample
+[2.048s] Installing odom_subscriber script to /home/sp/robot_ws/install/sample/lib/sample
+[2.049s] Installing tf_broadcaster script to /home/sp/robot_ws/install/sample/lib/sample
+[2.049s] Installing zed_depth_tester script to /home/sp/robot_ws/install/sample/lib/sample
+[2.049s] Installing zed_odom_tester script to /home/sp/robot_ws/install/sample/lib/sample
+[2.049s] 
+[2.049s] Installed /home/sp/robot_ws/build/sample
+[2.049s] running install_data
+[2.049s] creating /home/sp/robot_ws/install/sample/share/ament_index
+[2.050s] creating /home/sp/robot_ws/install/sample/share/ament_index/resource_index
+[2.050s] creating /home/sp/robot_ws/install/sample/share/ament_index/resource_index/packages
+[2.050s] copying resource/sample -> /home/sp/robot_ws/install/sample/share/ament_index/resource_index/packages
+[2.050s] copying package.xml -> /home/sp/robot_ws/install/sample/share/sample
+[2.050s] copying launch/gazebo.launch.py -> /home/sp/robot_ws/install/sample/share/sample
+[2.051s] copying launch/occupancy_grid.launch.py -> /home/sp/robot_ws/install/sample/share/sample
+[2.051s] copying launch/feature_points.launch.py -> /home/sp/robot_ws/install/sample/share/sample
+[2.051s] copying launch/cartographer.launch.py -> /home/sp/robot_ws/install/sample/share/sample
+[2.051s] copying launch/build_map.launch.py -> /home/sp/robot_ws/install/sample/share/sample
+[2.051s] copying assets/lds_2d (copy).lua -> /home/sp/robot_ws/install/sample/share/sample
+[2.051s] copying assets/pointcloud2.txt -> /home/sp/robot_ws/install/sample/share/sample
+[2.081s] copying assets/pointcloud1.txt -> /home/sp/robot_ws/install/sample/share/sample
+[2.104s] copying assets/colors.xacro -> /home/sp/robot_ws/install/sample/share/sample
+[2.104s] copying assets/cartographer.rviz -> /home/sp/robot_ws/install/sample/share/sample
+[2.104s] copying assets/lds_2d.lua -> /home/sp/robot_ws/install/sample/share/sample
+[2.104s] copying assets/scout-camera.urdf.xacro -> /home/sp/robot_ws/install/sample/share/sample
+[2.104s] copying assets/samplerobot.urdf -> /home/sp/robot_ws/install/sample/share/sample
+[2.160s] Invoked command in '/home/sp/robot_ws/build/sample' returned '0': PYTHONPATH=/home/sp/robot_ws/build/sample/prefix_override:/home/sp/robot_ws/install/sample/lib/python3.8/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py develop --editable --build-directory /home/sp/robot_ws/build/sample/build --no-deps install_data

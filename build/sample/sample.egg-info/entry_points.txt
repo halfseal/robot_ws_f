@@ -1,0 +1,9 @@
+[console_scripts]
+build_map = sample.build_map:main
+feature_points = sample.feature_points:main
+map_talker = sample.map_talker:main
+map_talker_copy = sample.map_talker_copy:main
+odom_subscriber = sample.odom_subscriber:main
+tf_broadcaster = sample.tf_broadcaster:main
+zed_depth_tester = sample.zed_depth_tester:main
+zed_odom_tester = sample.zed_odom_tester:main

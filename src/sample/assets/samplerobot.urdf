@@ -1,0 +1,115 @@
+<?xml version="1.0"?>
+<robot name="sample_robot">
+<material name="black">
+    <color rgba="0 0 0 1"/>
+</material>
+  <material name="white">
+    <color rgba="0 0 0 1"/>
+  </material>
+
+  <link name="base_footprint">
+  </link>
+
+  <gazebo reference="base_link">
+    <material>Gazebo/White</material>
+  </gazebo>
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <cylinder length="0.1" radius="0.1" />
+      </geometry>
+      <material name="white"/>
+    </visual>
+    <collision>
+      <geometry>
+        <cylinder length="0.1" radius="0.1" />
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="4.5" />
+      <inertia ixx="4.6875e-3" iyy="4.6875e-3" izz="7.5e-3" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+
+  <gazebo reference="laser_link">
+    <material>Gazebo/Black</material>
+  </gazebo>
+  <link name="laser_link">
+    <visual>
+      <geometry>
+        <box size="0.005 0.08 0.05" />
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <inertial>
+      <mass value="0.01" />
+      <inertia ixx="1e-6" iyy="1e-6" izz="1e-6" ixy="0" ixz="0" iyz="0" />
+    </inertial>
+  </link>
+
+  <joint name="base_joint" type="fixed">
+    <origin xyz="0.0 0.0 0.025" rpy="0.0 0.0 0.0" />
+    <parent link="base_footprint" />
+    <child link="base_link" />
+    <axis xyz="0 0 1" />
+  </joint>
+
+  <joint name="laser_joint" type="fixed">
+    <origin xyz="0.1 0.0 0.00" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="laser_link" />
+  </joint>
+
+  <joint name="imu_joint" type="fixed">
+    <origin xyz="0.0 0.0 0.1" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="imu_link" />
+  </joint>
+
+  <link name="imu_link">
+    <!-- Add visual, collision, inertial properties for imu_link here -->
+  </link>
+
+  <gazebo reference="laser_link">
+    <static>true</static>
+    <sensor type="ray" name="laser_controller"> 
+      <pose>0 0 0 0 0 0</pose>
+      <visualize>true</visualize>
+      <update_rate>10</update_rate>
+      <ray>
+        <scan>
+          <horizontal>
+            <samples>360</samples>
+            <resolution>1</resolution>
+            <min_angle>-3.1415</min_angle>
+            <max_angle>3.1240</max_angle>
+          </horizontal>
+        </scan>
+        <range>
+          <min>0.20</min>
+          <max>10.0</max>
+          <resolution>0.01</resolution>
+        </range>
+      </ray>
+      <plugin name="laser_controller" filename="libgazebo_ros_ray_sensor.so">
+        <ros>
+          <namespace>/</namespace>
+          <remapping>~/out:=scan</remapping>
+        </ros>
+        <frameName>laser_link</frameName>
+        <output_type>sensor_msgs/LaserScan</output_type>
+      </plugin>
+    </sensor>
+  </gazebo>
+
+  <gazebo>
+    <plugin name="object_controller" filename="libgazebo_ros_planar_move.so">
+      <commandTopic>cmd_vel</commandTopic>
+      <odometryTopic>odom</odometryTopic>
+      <odometryFrame>odom</odometryFrame>
+      <odometryRate>20.0</odometryRate>
+      <robotBaseFrame>base_footprint</robotBaseFrame>
+    </plugin>
+  </gazebo>
+
+</robot>
