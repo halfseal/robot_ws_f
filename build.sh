@@ -7,5 +7,3 @@ if [ "$1" == "remove" ] || [ "$1" == "rm" ]; then
 fi
 
 colcon build --symlink-install
-source install/setup.bash
-
