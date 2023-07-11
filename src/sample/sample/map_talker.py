@@ -5,6 +5,8 @@ from sensor_msgs.msg import PointCloud2, PointField
 from visualization_msgs.msg import Marker
 from geometry_msgs.msg import PoseStamped
 from geometry_msgs.msg import Point
+from geometry_msgs.msg import Quaternion
+from nav_msgs.msg import GridCells
 
 import struct
 import math
@@ -41,7 +43,31 @@ def read_points(msg):
     return np.array(points)
 
 
-def change_to_int(point, size):
+def quaternion_to_rotmat(o4x1: np.array) -> np.array:
+    # quaternion to rotation matrix
+    o4x1 /= np.linalg.norm(o4x1)
+    x, y, z, w = o4x1
+
+    rotation_matrix = np.array(
+        [
+            [1 - 2 * (y**2 + z**2), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+            [2 * (x * y + w * z), 1 - 2 * (x**2 + z**2), 2 * (y * z - w * x)],
+            [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x**2 + y**2)],
+        ]
+    )
+
+    return rotation_matrix
+
+
+def view_mx(orientation_4x1, pos_1x3):
+    rot3x3 = quaternion_to_rotmat(orientation_4x1)
+    view_matrix = np.identity(4)
+    view_matrix[:3, :3] = rot3x3.T
+    view_matrix[:3, 3] = -np.dot(rot3x3.T, pos_1x3)
+    return view_matrix
+
+
+def change_to_int(point: list, size: float) -> tuple:
     fx = math.floor(point[0] / size)
     fy = math.floor(point[1] / size)
     fz = math.floor(point[2] / size)
@@ -50,9 +76,9 @@ def change_to_int(point, size):
 
 class PointCloudManager:
     def __init__(self):
-        self.len = 0
         self.voxel_size = 0.2
         self.voxel_dict = {}
+        # only for drawing(rviz2)
         self.voxel_arr_fordraw = []
 
     def push_points(self, points):
@@ -73,10 +99,8 @@ class PointCloudManager:
             if z not in self.voxel_dict:
                 self.voxel_dict[z] = {}
             xy_mixed = (x, y)
-            if xy_mixed in self.voxel_dict[z]:
-                self.voxel_dict[z][xy_mixed] += 1
-            else:
-                self.voxel_dict[z][xy_mixed] = 1
+            if xy_mixed not in self.voxel_dict[z]:
+                self.voxel_dict[z][xy_mixed] = (x, y)
                 self.voxel_arr_fordraw.append(
                     Point(
                         x=float(x) * self.voxel_size + self.voxel_size * 0.5,
@@ -84,7 +108,6 @@ class PointCloudManager:
                         z=float(z) * self.voxel_size + self.voxel_size * 0.5,
                     )
                 )
-                self.len += 1
         return
 
 
@@ -98,6 +121,7 @@ class PointCloudSubscriber(Node):
             10,
         )
         self.point_subscription  # prevent unused variable warning
+
         self.pose_subscription = self.create_subscription(
             PoseStamped, "/zed2/zed_node/pose", self.pose_callback, 10
         )
@@ -106,37 +130,32 @@ class PointCloudSubscriber(Node):
         self.camera_pose_publisher = self.create_publisher(
             PoseStamped, "/map_talker/camera_pose", 10
         )
-        self.marker_publisher = self.create_publisher(Marker, "/map_talker/marker", 10)
         self.pointcloud_publisher = self.create_publisher(
             PointCloud2, "/map_talker/pc2", 10
         )
-
+        self.marker_publisher = self.create_publisher(Marker, "/map_talker/marker", 10)
         self.pcm = PointCloudManager()
 
+        self.pos = None
+
     def pointcloud_callback(self, msg):
-        # Create a new PointCloud2 message with necessary information
         pcmsg = PointCloud2()
-        pcmsg.header = msg.header
+        pcmsg.header.frame_id = msg.header.frame_id
         pcmsg.height = msg.height
         pcmsg.width = msg.width
         pcmsg.fields = msg.fields
         pcmsg.is_bigendian = msg.is_bigendian
         pcmsg.point_step = msg.point_step
         pcmsg.row_step = msg.row_step
+        pcmsg.data = msg.data
+        self.pointcloud_publisher.publish(pcmsg)
 
-        # Copy the data from the original message
-        pcmsg.data = msg.data[:]
-
-        # Publish the new PointCloud2 message
-        self.pointcloud_publisher.publish(pcmsg)        
-        
+        if self.pos is None:
+            return
         points = read_points(msg)
-
         points = points.reshape(len(points), 4, 1)
         points = np.matmul(np.linalg.inv(view_mx(self.orientation, self.pos)), points)
-
         self.pcm.push_points(points)
-        print("pcm.len: ", self.pcm.len)
 
         self.marker_publish(msg.header.frame_id)
 
@@ -189,29 +208,6 @@ class PointCloudSubscriber(Node):
 
         # Publish the camera pose message
         self.camera_pose_publisher.publish(camera_pose_msg)
-
-def view_mx(orientation_4x1: np.array, pos_1x3: np.array) -> np.array:
-    rot3x3 = quarternion_to_rotmat(orientation_4x1)
-    view_matrix = np.identity(4)
-    view_matrix[:3, :3] = rot3x3.T
-    view_matrix[:3, 3] = -np.dot(rot3x3.T, pos_1x3)
-
-    return view_matrix
-
-
-def quarternion_to_rotmat(o4x1: np.array) -> np.array:
-    o4x1 /= np.linalg.norm(o4x1)
-    x, y, z, w = o4x1
-
-    rotation_matrix = np.array(
-        [
-            [1 - 2 * (y**2 + z**2), 2 * (x * y - w * z), 2 * (x * z + w * y)],
-            [2 * (x * y + w * z), 1 - 2 * (x**2 + z**2), 2 * (y * z - w * x)],
-            [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x**2 + y**2)],
-        ]
-    )
-
-    return rotation_matrix
 
 
 def main(args=None):
