@@ -161,7 +161,7 @@ class PointCloudSubscriber(Node):
         #         file.write(line)
 
         # points = points.reshape(len(points), 4, 1)
-        # points = np.matmul(np.linalg.inv(view_mx(self.orientation, self.pos)), points)
+        points = np.matmul(np.linalg.inv(view_mx(self.orientation, self.pos)), points)
 
         self.pcm.push_points(points)
         # print("pcm.len: ", self.pcm.len)
