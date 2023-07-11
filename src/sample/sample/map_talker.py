@@ -5,6 +5,8 @@ from sensor_msgs.msg import PointCloud2, PointField
 from visualization_msgs.msg import Marker
 from geometry_msgs.msg import PoseStamped
 from geometry_msgs.msg import Point
+from geometry_msgs.msg import Quaternion
+from nav_msgs.msg import GridCells
 
 import struct
 import math
@@ -15,7 +17,7 @@ def read_points(msg):
     fields = msg.fields
     field_names = [field.name for field in fields]
     field_offsets = [field.offset for field in fields]
-    field_sizes = [field.count for field in fields]
+    # field_sizes = [field.count for field in fields]
 
     # Find the x, y, z fields
     x_idx = field_names.index("x")
@@ -41,7 +43,23 @@ def read_points(msg):
     return np.array(points)
 
 
-def change_to_int(point, size):
+def quaternion_to_rotmat(o4x1: np.array) -> np.array:
+    # quaternion to rotation matrix
+    o4x1 /= np.linalg.norm(o4x1)
+    x, y, z, w = o4x1
+
+    rotation_matrix = np.array(
+        [
+            [1 - 2 * (y**2 + z**2), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+            [2 * (x * y + w * z), 1 - 2 * (x**2 + z**2), 2 * (y * z - w * x)],
+            [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x**2 + y**2)],
+        ]
+    )
+
+    return rotation_matrix
+
+
+def change_to_int(point: list, size: float) -> tuple:
     fx = math.floor(point[0] / size)
     fy = math.floor(point[1] / size)
     fz = math.floor(point[2] / size)
@@ -50,9 +68,9 @@ def change_to_int(point, size):
 
 class PointCloudManager:
     def __init__(self):
-        self.len = 0
         self.voxel_size = 0.2
         self.voxel_dict = {}
+        # only for drawing(rviz2)
         self.voxel_arr_fordraw = []
 
     def push_points(self, points):
@@ -72,6 +90,12 @@ class PointCloudManager:
 
             x, y, z = change_to_int(point, self.voxel_size)
 
+            if z not in self.voxel_dict:
+                self.voxel_dict[z] = {}
+            xy_mixed = (x, y)
+            if xy_mixed not in self.voxel_dict[z]:
+                self.voxel_dict[z][xy_mixed] = (x, y)
+
             self.voxel_arr_fordraw.append(
                 Point(
                     x=float(x) * self.voxel_size + self.voxel_size * 0.5,
@@ -79,23 +103,6 @@ class PointCloudManager:
                     z=float(z) * self.voxel_size + self.voxel_size * 0.5,
                 )
             )
-            continue
-            if z not in self.voxel_dict:
-                self.voxel_dict[z] = {}
-            xy_mixed = x << 16 | y
-            if xy_mixed in self.voxel_dict[z]:
-                self.voxel_dict[z][xy_mixed] += 1
-            else:
-                self.voxel_dict[z][xy_mixed] = 1
-                self.voxel_arr_fordraw.append(
-                    Point(
-                        x=float(x) * self.voxel_size + self.voxel_size * 0.5,
-                        y=float(y) * self.voxel_size + self.voxel_size * 0.5,
-                        z=float(z) * self.voxel_size + self.voxel_size * 0.5,
-                    )
-                )
-                self.len += 1
-        print("array  len: ", len(self.voxel_arr_fordraw))
         return
 
 
@@ -121,10 +128,14 @@ class PointCloudSubscriber(Node):
         self.pointcloud_publisher = self.create_publisher(
             PointCloud2, "/map_talker/pc2", 10
         )
-
+        self.grid_publisher = self.create_publisher(
+            GridCells, "/map_talker/gridcells", 10
+        )
         self.pcm = PointCloudManager()
 
-        self.counter = 0
+        self.pos = None
+        self.orientation = None
+        self.myor = None
 
     def pointcloud_callback(self, msg):
         pcmsg = PointCloud2()
@@ -140,37 +151,48 @@ class PointCloudSubscriber(Node):
         self.pointcloud_publisher.publish(pcmsg)
 
         points = read_points(msg)
-        print("points len: ", len(points))
-
-        # file_path = "output%d.txt" % self.counter
-        # self.counter += 1
-        # with open(file_path, "w") as file:
-        #     for point in points:
-        #         x, y, z = point[0], point[1], point[2]
-        #         if (
-        #             np.isinf(x)
-        #             or np.isinf(y)
-        #             or np.isinf(z)
-        #             or np.isnan(x)
-        #             or np.isnan(y)
-        #             or np.isnan(z)
-        #         ):
-        #             continue
-
-        #         line = f"{x} {y} {z}\n"
-        #         file.write(line)
-
-        # points = points.reshape(len(points), 4, 1)
-        # points = np.matmul(np.linalg.inv(view_mx(self.orientation, self.pos)), points)
+        # print("points len: ", len(points))
 
         self.pcm.push_points(points)
-        # print("pcm.len: ", self.pcm.len)
 
-        self.marker_publish()
+        self.marker_publish(msg.header.frame_id)
+        self.grid_publish(msg.header.frame_id)
 
-    def marker_publish(self):
+    def grid_publish(self, frame_id):
+        if self.pos is None:
+            return
+
+        xpos, ypos, zpos = change_to_int(self.pos, self.pcm.voxel_size)
+
+        grid_cells_msg = GridCells()
+        grid_cells_msg.header.frame_id = frame_id
+        grid_cells_msg.cell_width = self.pcm.voxel_size
+        grid_cells_msg.cell_height = self.pcm.voxel_size
+
+        rotmat = quaternion_to_rotmat(self.orientation)
+        world_dir = np.dot(rotmat, np.array([1, 0, 0]))
+        world_dir = rotmat[:, 0]
+        print(world_dir)
+        self.myor = np.array([world_dir[0], world_dir[1]])
+        self.myor = self.myor / np.linalg.norm(self.myor)
+
+        zmap = self.pcm.voxel_dict[zpos]
+        for key in zmap:
+            x, y = zmap[key]
+            # if x < xpos - 10 or x > xpos + 10 or y < ypos - 10 or y > ypos + 10:
+            # continue
+
+            cell = Point()
+            cell.x = float(x) * self.pcm.voxel_size + self.pcm.voxel_size * 0.5
+            cell.y = float(y) * self.pcm.voxel_size + self.pcm.voxel_size * 0.5
+            cell.z = float(zpos) * self.pcm.voxel_size + self.pcm.voxel_size * 0.5
+            grid_cells_msg.cells.append(cell)
+
+        self.grid_publisher.publish(grid_cells_msg)
+
+    def marker_publish(self, frame_id):
         marker = Marker()
-        marker.header.frame_id = "base_link"
+        marker.header.frame_id = frame_id
         marker.type = Marker.CUBE_LIST
         marker.action = Marker.DELETEALL
         marker.scale.x = self.pcm.voxel_size
@@ -183,7 +205,7 @@ class PointCloudSubscriber(Node):
         self.marker_publisher.publish(marker)
 
         marker = Marker()
-        marker.header.frame_id = "base_link"
+        marker.header.frame_id = frame_id
         marker.type = Marker.CUBE_LIST
         marker.action = Marker.ADD
         marker.scale.x = self.pcm.voxel_size
@@ -203,7 +225,17 @@ class PointCloudSubscriber(Node):
         camera_pose_msg = PoseStamped()
         camera_pose_msg.header = msg.header
         camera_pose_msg.pose.position = camera_position
-        camera_pose_msg.pose.orientation = camera_orientation
+        if self.myor is not None:
+            angle = math.atan2(self.myor[1], self.myor[0])
+            half_angle = angle / 2.0
+
+            camera_pose_msg.pose.orientation = Quaternion()
+            camera_pose_msg.pose.orientation.w = math.cos(half_angle)
+            camera_pose_msg.pose.orientation.x = 0.0
+            camera_pose_msg.pose.orientation.y = 0.0
+            camera_pose_msg.pose.orientation.z = math.sin(half_angle)
+        else:
+            camera_pose_msg.pose.orientation = camera_orientation
 
         self.pos = np.array([camera_position.x, camera_position.y, camera_position.z])
         self.orientation = np.array(
@@ -217,37 +249,6 @@ class PointCloudSubscriber(Node):
 
         # Publish the camera pose message
         self.camera_pose_publisher.publish(camera_pose_msg)
-
-
-i = 0
-
-
-def view_mx(orientation_4x1, pos_1x3):
-    rot3x3 = Q2M(orientation_4x1)
-    view_matrix = np.identity(4)
-    view_matrix[:3, :3] = rot3x3.T
-    view_matrix[:3, 3] = -np.dot(rot3x3.T, pos_1x3)
-    # global i
-    # if not i:
-    #     print("view_matrix: \n", view_matrix)
-    # i += 1
-
-    return view_matrix
-
-
-def Q2M(o4x1):
-    o4x1 /= np.linalg.norm(o4x1)
-    x, y, z, w = o4x1
-
-    rotation_matrix = np.array(
-        [
-            [1 - 2 * (y**2 + z**2), 2 * (x * y - w * z), 2 * (x * z + w * y)],
-            [2 * (x * y + w * z), 1 - 2 * (x**2 + z**2), 2 * (y * z - w * x)],
-            [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x**2 + y**2)],
-        ]
-    )
-
-    return rotation_matrix
 
 
 def main(args=None):
