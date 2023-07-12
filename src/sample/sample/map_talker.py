@@ -8,8 +8,10 @@ from geometry_msgs.msg import Point
 from geometry_msgs.msg import Quaternion
 from nav_msgs.msg import GridCells
 
+import open3d as o3d
 import struct
 import math
+import time
 
 
 def read_points(msg):
@@ -17,30 +19,34 @@ def read_points(msg):
     fields = msg.fields
     field_names = [field.name for field in fields]
     field_offsets = [field.offset for field in fields]
-    # field_sizes = [field.count for field in fields]
 
     # Find the x, y, z fields
     x_idx = field_names.index("x")
     y_idx = field_names.index("y")
     z_idx = field_names.index("z")
 
-    # Get data size
+    # Get data size and point step size
     data = msg.data
     data_size = len(data)
-
-    # Calculate point step size
     point_step = msg.point_step
 
-    points = []
+    # Extract x, y, z coordinates from the data using np.frombuffer()
+    data_buffer = np.frombuffer(data, dtype=np.float32)
 
-    # Extract x, y, z coordinates from the data
-    for i in range(0, data_size, point_step):
-        x = struct.unpack_from("f", data, i + field_offsets[x_idx])[0]
-        y = struct.unpack_from("f", data, i + field_offsets[y_idx])[0]
-        z = struct.unpack_from("f", data, i + field_offsets[z_idx])[0]
-        points.append(np.array([x, y, z, 1]))
+    # Reshape the data buffer to match the structure of the point cloud
+    point_data = data_buffer.reshape(-1, point_step // 4)
 
-    return np.array(points)
+    # Perform point validity checks and create points array
+    mask = (
+        np.isfinite(point_data[:, x_idx])
+        & np.isfinite(point_data[:, y_idx])
+        & np.isfinite(point_data[:, z_idx])
+    )
+    valid_points = point_data[mask]
+
+    return np.hstack(
+        (valid_points[:, :3], np.ones((valid_points.shape[0], 1), dtype=np.float32))
+    )
 
 
 def quaternion_to_rotmat(o4x1: np.array) -> np.array:
@@ -80,40 +86,14 @@ class PointCloudManager:
         self.voxel_dict = {}
         # only for drawing(rviz2)
         self.voxel_arr_fordraw = []
-
-    def push_points(self, points):
-        for point in points:
-            x, y, z = point[0], point[1], point[2]
-            if (
-                np.isinf(x)
-                or np.isinf(y)
-                or np.isinf(z)
-                or np.isnan(x)
-                or np.isnan(y)
-                or np.isnan(z)
-            ):
-                continue
-
-            x, y, z = change_to_int(point, self.voxel_size)
-
-            if z not in self.voxel_dict:
-                self.voxel_dict[z] = {}
-            xy_mixed = (x, y)
-            if xy_mixed not in self.voxel_dict[z]:
-                self.voxel_dict[z][xy_mixed] = (x, y)
-                self.voxel_arr_fordraw.append(
-                    Point(
-                        x=float(x) * self.voxel_size + self.voxel_size * 0.5,
-                        y=float(y) * self.voxel_size + self.voxel_size * 0.5,
-                        z=float(z) * self.voxel_size + self.voxel_size * 0.5,
-                    )
-                )
-        return
+        self.pcd = o3d.geometry.PointCloud()
 
 
 class PointCloudSubscriber(Node):
     def __init__(self):
         super().__init__("pointcloud_subscriber")
+
+        print("================PointCloudSubscriber initiated!================")
         self.point_subscription = self.create_subscription(
             PointCloud2,
             "/zed2/zed_node/point_cloud/cloud_registered",
@@ -130,8 +110,8 @@ class PointCloudSubscriber(Node):
         self.camera_pose_publisher = self.create_publisher(
             PoseStamped, "/map_talker/camera_pose", 10
         )
-        self.pointcloud_publisher = self.create_publisher(
-            PointCloud2, "/map_talker/pc2", 10
+        self.grid_publisher = self.create_publisher(
+            GridCells, "/map_talker/gridcells", 10
         )
         self.marker_publisher = self.create_publisher(Marker, "/map_talker/marker", 10)
         self.pcm = PointCloudManager()
@@ -139,25 +119,49 @@ class PointCloudSubscriber(Node):
         self.pos = None
 
     def pointcloud_callback(self, msg):
-        pcmsg = PointCloud2()
-        pcmsg.header.frame_id = msg.header.frame_id
-        pcmsg.height = msg.height
-        pcmsg.width = msg.width
-        pcmsg.fields = msg.fields
-        pcmsg.is_bigendian = msg.is_bigendian
-        pcmsg.point_step = msg.point_step
-        pcmsg.row_step = msg.row_step
-        pcmsg.data = msg.data
-        self.pointcloud_publisher.publish(pcmsg)
-
         if self.pos is None:
             return
+
         points = read_points(msg)
         points = points.reshape(len(points), 4, 1)
+
         points = np.matmul(np.linalg.inv(view_mx(self.orientation, self.pos)), points)
-        self.pcm.push_points(points)
+        points = points.reshape(len(points), 4)
+
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(points[:, :3])
+        self.pcm.pcd += pcd
+        self.pcm.pcd = self.pcm.pcd.voxel_down_sample(voxel_size=self.pcm.voxel_size)
 
         self.marker_publish(msg.header.frame_id)
+        self.grid_publish(msg.header.frame_id)
+
+    def grid_publish(self, frame_id):
+        if self.pos is None:
+            return
+
+        grid_cells_msg = GridCells()
+        grid_cells_msg.header.frame_id = frame_id
+        grid_cells_msg.cell_width = self.pcm.voxel_size
+        grid_cells_msg.cell_height = self.pcm.voxel_size
+
+        threshold_lower = self.pos[2] - self.pcm.voxel_size * 0.5
+        threshold_upper = self.pos[2] + self.pcm.voxel_size * 0.5
+
+        points = np.asarray(self.pcm.pcd.points)
+
+        selected_points = points[
+            (points[:, 2] > threshold_lower) & (points[:, 2] < threshold_upper)
+        ]
+
+        for point in selected_points:
+            p = Point()
+            p.x = point[0]
+            p.y = point[1]
+            p.z = point[2]
+            grid_cells_msg.cells.append(p)
+
+        self.grid_publisher.publish(grid_cells_msg)
 
     def marker_publish(self, frame_id):
         marker = Marker()
@@ -184,7 +188,15 @@ class PointCloudSubscriber(Node):
         marker.color.r = 1.0
         marker.color.g = 1.0
         marker.color.b = 1.0
-        marker.points = self.pcm.voxel_arr_fordraw
+
+        points = np.asarray(self.pcm.pcd.points)
+        for point in points:
+            p = Point()
+            p.x = point[0]
+            p.y = point[1]
+            p.z = point[2]
+            marker.points.append(p)
+
         self.marker_publisher.publish(marker)
 
     def pose_callback(self, msg):
