@@ -8,17 +8,21 @@ from geometry_msgs.msg import Point
 from geometry_msgs.msg import Quaternion
 from nav_msgs.msg import GridCells
 
-import open3d as o3d
-import struct
 import math
-import time
+
+######################################################
+# can simply import open3d by
+#    pip install open3d
+import open3d as o3d
+
+######################################################
 
 
 def read_points(msg):
     # Get field information
     fields = msg.fields
     field_names = [field.name for field in fields]
-    field_offsets = [field.offset for field in fields]
+    # field_offsets = [field.offset for field in fields]
 
     # Find the x, y, z fields
     x_idx = field_names.index("x")
@@ -27,7 +31,7 @@ def read_points(msg):
 
     # Get data size and point step size
     data = msg.data
-    data_size = len(data)
+    # data_size = len(data)
     point_step = msg.point_step
 
     # Extract x, y, z coordinates from the data using np.frombuffer()
@@ -41,6 +45,10 @@ def read_points(msg):
         np.isfinite(point_data[:, x_idx])
         & np.isfinite(point_data[:, y_idx])
         & np.isfinite(point_data[:, z_idx])
+        & (point_data[:, x_idx] < 14.0)
+        & (point_data[:, x_idx] > -14.0)
+        & (point_data[:, y_idx] < 14.0)
+        & (point_data[:, y_idx] > -14.0)
     )
     valid_points = point_data[mask]
 
@@ -80,20 +88,13 @@ def change_to_int(point: list, size: float) -> tuple:
     return int(fx), int(fy), int(fz)
 
 
-class PointCloudManager:
-    def __init__(self):
-        self.voxel_size = 0.2
-        self.voxel_dict = {}
-        # only for drawing(rviz2)
-        self.voxel_arr_fordraw = []
-        self.pcd = o3d.geometry.PointCloud()
-
-
 class PointCloudSubscriber(Node):
     def __init__(self):
         super().__init__("pointcloud_subscriber")
 
-        print("================PointCloudSubscriber initiated!================")
+        print("================map_talker initiated!================")
+
+        # pointcloud2 msg 읽어옴
         self.point_subscription = self.create_subscription(
             PointCloud2,
             "/zed2/zed_node/point_cloud/cloud_registered",
@@ -102,36 +103,79 @@ class PointCloudSubscriber(Node):
         )
         self.point_subscription  # prevent unused variable warning
 
+        # pose msg 읽어옴
         self.pose_subscription = self.create_subscription(
             PoseStamped, "/zed2/zed_node/pose", self.pose_callback, 10
         )
         self.pose_subscription  # prevent unused variable warning
 
-        self.camera_pose_publisher = self.create_publisher(
-            PoseStamped, "/map_talker/camera_pose", 10
-        )
+        # self.camera_pose_publisher = self.create_publisher(
+        #     PoseStamped, "/map_talker/camera_pose", 10
+        # )
+
         self.grid_publisher = self.create_publisher(
             GridCells, "/map_talker/gridcells", 10
         )
+
         self.marker_publisher = self.create_publisher(Marker, "/map_talker/marker", 10)
-        self.pcm = PointCloudManager()
 
         self.pos = None
+
+        self.pcd = o3d.geometry.PointCloud()
+        self.voxel_size = 0.2
 
     def pointcloud_callback(self, msg):
         if self.pos is None:
             return
 
+        ######################################################
+        # zed camera coordinate system points
         points = read_points(msg)
         points = points.reshape(len(points), 4, 1)
 
-        points = np.matmul(np.linalg.inv(view_mx(self.orientation, self.pos)), points)
-        points = points.reshape(len(points), 4)
+        ######################################################
+        # making zed camera coordinate system points
+        # to zed world coordinate system points
+        # points = np.matmul(np.linalg.inv(view_mx(self.orientation, self.pos)), points)
+        # points = points.reshape(len(points), 4)
+        points = points[:, :3, :]
+        rotmat = quaternion_to_rotmat(self.orientation)
+        points = np.matmul(rotmat, points) + self.pos.reshape(3, 1)
+
+        ######################################################
+        ######################################################
+        # NOTICE : I'VE NEVER VISUALIZED OR CHECKED NED CONVERSION(THE CODE BELOW THIS NOTICE) YET
+        # NOTICE : I'VE NEVER VISUALIZED OR CHECKED NED CONVERSION(THE CODE BELOW THIS NOTICE) YET
+        ######################################################
+        ######################################################
+        # making zed world coordinate system points
+        # to NED world coordinate system points
+        #
+        # in this code, I was trying to do this.
+        #
+        #   N                 1  0  0     cx     tx
+        #   E  =  quatmat  x  0 -1  0  x  cy  +  ty
+        #   D                 0  0 -1     cz     tz
+        #
+        # cmat = np.array(
+        #     [
+        #         [1, 0, 0],
+        #         [0, -1, 0],
+        #         [0, 0, -1],
+        #     ]
+        # )
+        # quatmat = quaternion_to_rotmat(self.orientation)
+        # points = np.matmul(cmat, points)
+        # points = np.matmul(quatmat, points)
+        # points += self.pos.reshape(3, 1)
+        ######################################################
+        # downsampling pointcloud using open3d
+        points = points.reshape(len(points), 3)
 
         pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(points[:, :3])
-        self.pcm.pcd += pcd
-        self.pcm.pcd = self.pcm.pcd.voxel_down_sample(voxel_size=self.pcm.voxel_size)
+        pcd.points = o3d.utility.Vector3dVector(points)
+        self.pcd += pcd
+        self.pcd = self.pcd.voxel_down_sample(voxel_size=self.voxel_size)
 
         self.marker_publish(msg.header.frame_id)
         self.grid_publish(msg.header.frame_id)
@@ -142,13 +186,13 @@ class PointCloudSubscriber(Node):
 
         grid_cells_msg = GridCells()
         grid_cells_msg.header.frame_id = frame_id
-        grid_cells_msg.cell_width = self.pcm.voxel_size
-        grid_cells_msg.cell_height = self.pcm.voxel_size
+        grid_cells_msg.cell_width = self.voxel_size
+        grid_cells_msg.cell_height = self.voxel_size
 
-        threshold_lower = self.pos[2] - self.pcm.voxel_size * 0.5
-        threshold_upper = self.pos[2] + self.pcm.voxel_size * 0.5
+        threshold_lower = self.pos[2] - self.voxel_size * 0.5
+        threshold_upper = self.pos[2] + self.voxel_size * 0.5
 
-        points = np.asarray(self.pcm.pcd.points)
+        points = np.asarray(self.pcd.points)
 
         selected_points = points[
             (points[:, 2] > threshold_lower) & (points[:, 2] < threshold_upper)
@@ -160,17 +204,18 @@ class PointCloudSubscriber(Node):
             p.y = point[1]
             p.z = point[2]
             grid_cells_msg.cells.append(p)
-
+        print("grid cell num: ", len(selected_points))
         self.grid_publisher.publish(grid_cells_msg)
 
+    # only for checking(visualization)
     def marker_publish(self, frame_id):
         marker = Marker()
         marker.header.frame_id = frame_id
         marker.type = Marker.CUBE_LIST
         marker.action = Marker.DELETEALL
-        marker.scale.x = self.pcm.voxel_size
-        marker.scale.y = self.pcm.voxel_size
-        marker.scale.z = self.pcm.voxel_size
+        marker.scale.x = self.voxel_size
+        marker.scale.y = self.voxel_size
+        marker.scale.z = self.voxel_size
         marker.color.a = 1.0
         marker.color.r = 1.0
         marker.color.g = 1.0
@@ -181,15 +226,15 @@ class PointCloudSubscriber(Node):
         marker.header.frame_id = frame_id
         marker.type = Marker.CUBE_LIST
         marker.action = Marker.ADD
-        marker.scale.x = self.pcm.voxel_size
-        marker.scale.y = self.pcm.voxel_size
-        marker.scale.z = self.pcm.voxel_size
+        marker.scale.x = self.voxel_size
+        marker.scale.y = self.voxel_size
+        marker.scale.z = self.voxel_size
         marker.color.a = 1.0
         marker.color.r = 1.0
         marker.color.g = 1.0
         marker.color.b = 1.0
 
-        points = np.asarray(self.pcm.pcd.points)
+        points = np.asarray(self.pcd.points)
         for point in points:
             p = Point()
             p.x = point[0]
@@ -213,13 +258,12 @@ class PointCloudSubscriber(Node):
             ]
         )
 
-        camera_pose_msg = PoseStamped()
-        camera_pose_msg.header = msg.header
-        camera_pose_msg.pose.position = camera_position
-        camera_pose_msg.pose.orientation = camera_orientation
-
-        # Publish the camera pose message
-        self.camera_pose_publisher.publish(camera_pose_msg)
+        # only for checking. not used
+        # camera_pose_msg = PoseStamped()
+        # camera_pose_msg.header = msg.header
+        # camera_pose_msg.pose.position = camera_position
+        # camera_pose_msg.pose.orientation = camera_orientation
+        # self.camera_pose_publisher.publish(camera_pose_msg)
 
 
 def main(args=None):

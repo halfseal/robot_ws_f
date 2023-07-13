@@ -31,7 +31,7 @@ setup(
             'map_talker_copy = sample.map_talker_copy:main',
             'tf_broadcaster = sample.tf_broadcaster:main',
             'zed_odom_tester = sample.zed_odom_tester:main',
-            'zed_depth_tester = sample.zed_depth_tester:main',
+            'pc_talker = sample.pc_talker:main',
         ],
     },
 )
