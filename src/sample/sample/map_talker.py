@@ -139,8 +139,8 @@ class PointCloudSubscriber(Node):
         # points = np.matmul(np.linalg.inv(view_mx(self.orientation, self.pos)), points)
         # points = points.reshape(len(points), 4)
         points = points[:, :3, :]
-        rotmat = quaternion_to_rotmat(self.orientation)
-        points = np.matmul(rotmat, points) + self.pos.reshape(3, 1)
+        # rotmat = quaternion_to_rotmat(self.orientation)
+        # points = np.matmul(rotmat, points) + self.pos.reshape(3, 1)
 
         ######################################################
         ######################################################
@@ -157,16 +157,16 @@ class PointCloudSubscriber(Node):
         #   E  =  quatmat  x  0 -1  0  x  cy  +  ty
         #   D                 0  0 -1     cz     tz
         #
-        # cmat = np.array(
-        #     [
-        #         [1, 0, 0],
-        #         [0, -1, 0],
-        #         [0, 0, -1],
-        #     ]
-        # )
-        # quatmat = quaternion_to_rotmat(self.orientation)
-        # points = np.matmul(cmat, points)
-        # points = np.matmul(quatmat, points)
+        cmat = np.array(
+            [
+                [1, 0, 0],
+                [0, -1, 0],
+                [0, 0, -1],
+            ]
+        )
+        rotmat = quaternion_to_rotmat(self.orientation)
+        points = np.matmul(cmat, points)
+        points = np.matmul(rotmat, points)
         # points += self.pos.reshape(3, 1)
         ######################################################
         # downsampling pointcloud using open3d
