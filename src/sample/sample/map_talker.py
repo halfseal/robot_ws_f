@@ -167,7 +167,7 @@ class PointCloudSubscriber(Node):
         rotmat = quaternion_to_rotmat(self.orientation)
         points = np.matmul(cmat, points)
         points = np.matmul(rotmat, points)
-        # points += self.pos.reshape(3, 1)
+        points += self.pos.reshape(3, 1)
         ######################################################
         # downsampling pointcloud using open3d
         points = points.reshape(len(points), 3)
