@@ -3,7 +3,7 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import PointCloud2, PointField
 from visualization_msgs.msg import Marker
-from geometry_msgs.msg import PoseStamped
+from px4_msgs.msg import VehicleOdometry
 from geometry_msgs.msg import Point
 from geometry_msgs.msg import Quaternion
 from nav_msgs.msg import GridCells
@@ -92,12 +92,12 @@ class PointCloudSubscriber(Node):
     def __init__(self):
         super().__init__("pointcloud_subscriber")
 
-        print("================map_talker initiated!================")
+        self.get_logger().info("map_talker initiated!")
 
         # pointcloud2 msg 읽어옴
         self.point_subscription = self.create_subscription(
             PointCloud2,
-            "/zed2/zed_node/point_cloud/cloud_registered",
+            "/depth_camera/points",
             self.pointcloud_callback,
             10,
         )
@@ -105,7 +105,7 @@ class PointCloudSubscriber(Node):
 
         # pose msg 읽어옴
         self.pose_subscription = self.create_subscription(
-            PoseStamped, "/zed2/zed_node/pose", self.pose_callback, 10
+            VehicleOdometry, "/fmu/vehicle_odometry/out", self.pose_callback, 10
         )
         self.pose_subscription  # prevent unused variable warning
 
@@ -113,11 +113,16 @@ class PointCloudSubscriber(Node):
         #     PoseStamped, "/map_talker/camera_pose", 10
         # )
 
+        self.pc2_publisher = self.create_publisher(PointCloud2, "/map_talker/pc2", 10)
+
         self.grid_publisher = self.create_publisher(
             GridCells, "/map_talker/gridcells", 10
         )
 
         self.marker_publisher = self.create_publisher(Marker, "/map_talker/marker", 10)
+        self.odom_marker_publisher = self.create_publisher(
+            Marker, "/map_talker/odom_marker", 10
+        )
 
         self.pos = None
 
@@ -125,12 +130,25 @@ class PointCloudSubscriber(Node):
         self.voxel_size = 0.2
 
     def pointcloud_callback(self, msg):
+        pcmsg = PointCloud2()
+        pcmsg.header.frame_id = "base_link"
+        pcmsg.height = msg.height
+        pcmsg.width = msg.width
+        pcmsg.fields = msg.fields
+        pcmsg.is_bigendian = msg.is_bigendian
+        pcmsg.point_step = msg.point_step
+        pcmsg.row_step = msg.row_step
+        pcmsg.data = msg.data
+        self.pc2_publisher.publish(pcmsg)
+
         if self.pos is None:
             return
-
+        self.get_logger().info("pointcloud_callback")
         ######################################################
         # zed camera coordinate system points
         points = read_points(msg)
+        self.get_logger().info(f"num of points: {len(points)}")
+
         points = points.reshape(len(points), 4, 1)
 
         ######################################################
@@ -141,6 +159,12 @@ class PointCloudSubscriber(Node):
         points = points[:, :3, :]
         # rotmat = quaternion_to_rotmat(self.orientation)
         # points = np.matmul(rotmat, points) + self.pos.reshape(3, 1)
+
+        points = points.reshape(len(points), 3)
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(points)
+        o3d.io.write_point_cloud("pcd_from_msg.pcd", pcd, True)
+        points = points.reshape(len(points), 3, 1)
 
         ######################################################
         ######################################################
@@ -153,32 +177,51 @@ class PointCloudSubscriber(Node):
         #
         # in this code, I was trying to do this.
         #
-        #   N                 1  0  0     cx     tx
-        #   E  =  quatmat  x  0 -1  0  x  cy  +  ty
-        #   D                 0  0 -1     cz     tz
+        #   N                 0  0  1     cx     tx
+        #   E  =  quatmat  x  1  0  0  x  cy  +  ty
+        #   D                 0  1  0     cz     tz
         #
         cmat = np.array(
             [
+                [0, 0, 1],
+                [0, 1, 0],
+                [-1, 0, 0],
+            ]
+        )
+        cmat = np.array(
+            [
+                [0, 0, -1],
+                [0, 1, 0],
                 [1, 0, 0],
-                [0, -1, 0],
+            ]
+        )
+        cmat = np.array(
+            [
+                [-1, 0, 0],
+                [0, 1, 0],
                 [0, 0, -1],
             ]
         )
         rotmat = quaternion_to_rotmat(self.orientation)
+        print(rotmat)
         points = np.matmul(cmat, points)
         points = np.matmul(rotmat, points)
         points += self.pos.reshape(3, 1)
+
         ######################################################
         # downsampling pointcloud using open3d
         points = points.reshape(len(points), 3)
 
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points)
+        # If you want to stack pointclouds, use this operator +=
         self.pcd += pcd
+        # self.pcd = pcd
         self.pcd = self.pcd.voxel_down_sample(voxel_size=self.voxel_size)
 
-        self.marker_publish(msg.header.frame_id)
-        self.grid_publish(msg.header.frame_id)
+        self.marker_publish("base_link")
+        # self.marker_publish(msg.header.frame_id)
+        self.grid_publish("base_link")
 
     def grid_publish(self, frame_id):
         if self.pos is None:
@@ -189,8 +232,8 @@ class PointCloudSubscriber(Node):
         grid_cells_msg.cell_width = self.voxel_size
         grid_cells_msg.cell_height = self.voxel_size
 
-        threshold_lower = self.pos[2] - self.voxel_size * 0.5
-        threshold_upper = self.pos[2] + self.voxel_size * 0.5
+        threshold_lower = self.pos[2] - self.voxel_size * 0.25
+        threshold_upper = self.pos[2] + self.voxel_size * 0.25
 
         points = np.asarray(self.pcd.points)
 
@@ -204,7 +247,7 @@ class PointCloudSubscriber(Node):
             p.y = point[1]
             p.z = point[2]
             grid_cells_msg.cells.append(p)
-        print("grid cell num: ", len(selected_points))
+        self.get_logger().info(f"grid cell num: {len(selected_points)}")
         self.grid_publisher.publish(grid_cells_msg)
 
     # only for checking(visualization)
@@ -245,25 +288,43 @@ class PointCloudSubscriber(Node):
         self.marker_publisher.publish(marker)
 
     def pose_callback(self, msg):
-        camera_position = msg.pose.position
-        camera_orientation = msg.pose.orientation
+        self.get_logger().info("pose_callback")
 
-        self.pos = np.array([camera_position.x, camera_position.y, camera_position.z])
-        self.orientation = np.array(
-            [
-                camera_orientation.x,
-                camera_orientation.y,
-                camera_orientation.z,
-                camera_orientation.w,
-            ]
-        )
+        self.pos = np.array([msg.position[0], msg.position[1], msg.position[2]])
+        self.orientation = np.array([msg.q[0], msg.q[1], msg.q[2], msg.q[3]])
 
-        # only for checking. not used
-        # camera_pose_msg = PoseStamped()
-        # camera_pose_msg.header = msg.header
-        # camera_pose_msg.pose.position = camera_position
-        # camera_pose_msg.pose.orientation = camera_orientation
-        # self.camera_pose_publisher.publish(camera_pose_msg)
+        marker = Marker()
+        marker.header.frame_id = "base_link"
+        marker.type = Marker.CUBE_LIST
+        marker.action = Marker.DELETEALL
+        marker.scale.x = self.voxel_size
+        marker.scale.y = self.voxel_size
+        marker.scale.z = self.voxel_size
+        marker.color.a = 1.0
+        marker.color.r = 1.0
+        marker.color.g = 1.0
+        marker.color.b = 1.0
+        self.odom_marker_publisher.publish(marker)
+
+        marker = Marker()
+        marker.header.frame_id = "base_link"
+        marker.type = Marker.CUBE_LIST
+        marker.action = Marker.ADD
+        marker.scale.x = self.voxel_size
+        marker.scale.y = self.voxel_size
+        marker.scale.z = self.voxel_size
+        marker.color.a = 1.0
+        marker.color.r = 1.0
+        marker.color.g = 1.0
+        marker.color.b = 1.0
+
+        p = Point()
+        p.x = float(self.pos[0])
+        p.y = float(self.pos[1])
+        p.z = float(self.pos[2])
+        marker.points.append(p)
+
+        self.odom_marker_publisher.publish(marker)
 
 
 def main(args=None):
